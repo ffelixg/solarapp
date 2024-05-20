@@ -1,6 +1,17 @@
 import dash
 from dash import html, dcc, Input, Output, State
 from duckdb import query
+import threading
+# from log import do_logging, duckdisk, duckmem
+import logging
+
+# threading.Thread(target=do_logging).start()
+from duckdb import connect
+duckdisk = connect("db.duckdb", config={"threads": 2}, read_only=True)
+curdisk = duckdisk.cursor()
+# curmem = duckmem.cursor()
+disklock = threading.Lock()
+memlock = threading.Lock()
 
 app = dash.Dash(__name__)
 
@@ -9,108 +20,117 @@ app.layout = html.Div(
         html.Div(style={"hidden": "true"}, id="dummy"),
         dcc.Interval(
             id='interval',
-            interval=2 * 1000,
+            interval=5 * 1000,
             n_intervals=0
         ),
         dcc.Graph(
             figure={
-                'data': [
-                    # {'x': [1,2,3], 'y': [5,3,4], 'type': 'line', 'name': 'Line Chart'}
-                ],
+                'data': [],
                 'layout': {
-                    # 'title': 'Line Chart',
-                    # 'xaxis': {
-                    #     'title': 'Zeit',
-                    #     'tickformat': '%b %Y',  # this controls the format of the x-value in the hover box
-                    #     'tickmode': 'array',
-                    #     # 'ticktext': xticktext,
-                    #     # 'tickvals': xtickvals
-                    # },
-                    # 'yaxis': {'title': 'kW'},
-                    # 'showlegend': False,
-                    # 'hovertemplate': '%{hovertext}<br>',
-                    # 'hoverlabel': {"bgcolor": "white"},
-                    # 'xaxis': {'gridcolor': 'transparent', 'title': {'text': 'Datum'}},
-                    # 'yaxis': {'gridcolor': 'transparent', 'title': {'text': 'Rechnungszeit'}},
-                    # 'title': 'Line Chart',
-                    'xaxis': {
-                        # 'title': 'Zeit'
-                    },
+                    'xaxis': {},
                     'yaxis': {'title': 'Watt'},
                     'hovermode': 'x unified',
                 }
             },
             style={
                 "width": "100%",
-                "height": "100vh",
+                "height": "50vh",
             },
-            id="graph"
-        )
+            id="fig_live"
+        ),
+        dcc.Graph(
+            figure={
+                'data': [],
+                'layout': {
+                    'xaxis': {},
+                    'yaxis': {'title': 'Watt'},
+                    'hovermode': 'x unified',
+                }
+            },
+            style={
+                "width": "100%",
+                "height": "50vh",
+            },
+            id="fig_aggregate"
+        ),
     ]
 )
 
 @dash.callback(
-    Output("graph", "figure"),
+    Output("fig_aggregate", "figure"),
     Input("dummy", "children"),
 )
 def load_graph(dummy):
-    q = query("""
-        SELECT
-            strptime(Head.Timestamp, '%Y-%m-%dT%H:%M:%S%z'),
-            Body.Data.Site.P_PV PhotoVoltaik,
-            Body.Data.Site.P_Akku Akku,
-            Body.Data.Site.P_Grid Netz,
-            Body.Data.Site.P_Load Verbraucher
-        FROM read_json_auto('log.json', format = 'newline_delimited');
-    """)
-    names = q.columns
-    data = q.fetchall()
-    fig = dash.Patch()
-    fig['data'].extend([
-        {'x': [row[0] for row in data], 'y': [row[1] for row in data], 'type': 'line', 'name': names[1], 'line': {'color': '#00ff00', 'width': 4}},
-        {'x': [row[0] for row in data], 'y': [row[2] for row in data], 'type': 'line', 'name': names[2], 'line': {'color': '#00ffff', 'width': 4}},
-        {'x': [row[0] for row in data], 'y': [row[3] for row in data], 'type': 'line', 'name': names[3], 'line': {'color': '#ff0000', 'width': 4}},
-        {'x': [row[0] for row in data], 'y': [row[4] for row in data], 'type': 'line', 'name': names[4], 'line': {'color': '#000000', 'width': 4}},
-        # {'x': [row[0] for row in data], 'y': [[*row[1:]] for row in data], 'type': 'line', 'name': names[4]},
-    ])
-    # fig['layout'] = {
-    #     'title': 'Line Chart',
-    #     'xaxis': {'title': 'Zeit'},
-    #     'yaxis': {'title': 'kW'},
-    #     'hovermode': 'x unified',
-    # }
-    # df = q.df()
-    # fig = px.line(df, x=names[0], y=names[1:])
-    # fig.update_traces(hovertemplate="%{x|%d/%m} %{y}")
-    # fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray',
-    #     # range=xl,
-    #     # range=(df[names[0]].values.min(), df[names[0]].values.max()),
-    #     dtick="M1", tickformat="%b\n%Y")
-    # fig.update_layout(
-    #     hovermode='x unified',
-    # )
-    return fig
+    try:
+        with disklock:
+            data = curdisk.execute("select * from aggregated where time is not null").fetchall()
+        fig = dash.Patch()
+        def getcol(i):
+            return [row[i] for row in data]
+        names = {1: "PV", 4: "Akku", 7: "Grid", 10: "Load"}
+        def gettraces(i, color):
+            return [
+                {'x': X, 'y': getcol(i),
+                    'type': 'scatter',
+                    "fill": None,
+                    "fillgroup": 'one',
+                    "mode": 'lines',
+                    'line': {'color': '#000000', 'width': 0},
+                    "hoverinfo": "none",
+                    "showlegend": False,
+                },
+                {'x': X, 'y': getcol(i+1),
+                    "type": 'scatter',
+                    "fill": 'tonexty',
+                    "fillgroup": 'one',
+                    "fillcolor": f"#{color}44",
+                    "mode": 'lines',
+                    'line': {'color': '#000000', 'width': 0},
+                    "hovertext": [f"{names[i]} {row[i]:.2f} | {row[i+2]:.2f} | {row[i+1]:.2f}" for row in data],
+                    "hoverinfo": "text",
+                    "name": names[i],
+                },
+                {'x': X, 'y': getcol(i+2),
+                    "type": 'scatter',
+                    "mode": 'lines',
+                    'line': {'color': f'#{color}ff', 'width': 3},
+                    "hoverinfo": "none",
+                    "showlegend": False,
+                },
+            ]
+        X = getcol(0)
+        fig['data'].extend([
+            *gettraces(1, "00ff00"),
+            *gettraces(4, "00ffff"),
+            *gettraces(7, "ff0000"),
+            *gettraces(10, "000000"),
+        ])
+        print("game")
+        return fig
+    except Exception as e:
+        logging.exception("Error in load_graph")
+        raise
 
-@dash.callback(
-    Output("graph", "figure", allow_duplicate=True),
-    Input('interval', 'n_intervals'),
-    prevent_initial_call=True,
-)
-def update_graph(interval):
-    (time, *entries), = query("""
-        SELECT
-            strptime(Head.Timestamp, '%Y-%m-%dT%H:%M:%S%z'),
-            Body.Data.Site.P_PV,
-            Body.Data.Site.P_Akku,
-            Body.Data.Site.P_Grid,
-            Body.Data.Site.P_Load
-        FROM read_json_auto('most_recent.json');
-    """).fetchall()
-    fig = dash.Patch()
-    for i, entry in enumerate(entries):
-        fig["data"][i]["x"].append(time)
-        fig["data"][i]["y"].append(entry)
-    return fig
+# @dash.callback(
+#     Output("graph", "figure", allow_duplicate=True),
+#     Input('interval', 'n_intervals'),
+#     prevent_initial_call=True,
+# )
+# def update_graph(interval):
+#     (time, *entries), = query("""
+#         SELECT
+#             strptime(Head.Timestamp, '%Y-%m-%dT%H:%M:%S%z'),
+#             Body.Data.Site.P_PV,
+#             Body.Data.Site.P_Akku,
+#             Body.Data.Site.P_Grid,
+#             Body.Data.Site.P_Load
+#         FROM read_json_auto('most_recent.json');
+#     """).fetchall()
+#     fig = dash.Patch()
+#     for i, entry in enumerate(entries):
+#         fig["data"][i]["x"].append(time)
+#         fig["data"][i]["y"].append(entry)
+#     return fig
 
 # Run the app
 if __name__ == '__main__':

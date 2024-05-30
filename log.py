@@ -23,16 +23,6 @@ create table if not exists aggregated (
 create index if not exists idx_time_agg on aggregated(time);
 """)
 
-# ALTER TABLE aggregated ADD COLUMN cnt INTEGER
-# drop index idx_time
-# update aggregated set cnt = 1
-# execute("""
-# """)
-
-# execute("select * from aggregated", fetch="df")
-# execute("select datediff('second', time, (select max(time) from aggregated)), * from aggregated", fetch="df")
-# execute("truncate aggregated")
-
 execute("""
 create table if not exists new (
     time timestamp,
@@ -44,8 +34,6 @@ create table if not exists new (
 );
 create index if not exists idx_time_new on new(time);
 """)
-# execute("select * from new", fetch="df")
-# execute("truncate new")
 
 def dump():
     execute("""

@@ -3,7 +3,11 @@ from dash import html, dcc, Input, Output, State
 from db import execute
 import datetime
 
-app = dash.Dash(__name__)
+app = dash.Dash(
+    __name__,
+    title='Solaranlage',
+    update_title=None,
+)
 
 names_colors = (
     ("PV", "00ff00"),
@@ -11,20 +15,6 @@ names_colors = (
     ("Grid", "ff0000"),
     ("Load", "000000"),
 )
-
-def dates(startdate, direction):
-    offsets = []
-    display = []
-    i = 0
-    newdate = startdate
-    while newdate.month == startdate.month:
-        offsets.append(i)
-        display.append(str(newdate))
-        i += 1
-        newdate += direction * datetime.timedelta(days=1)
-    return offsets, display
-
-_, dates = dates(datetime.date(2020, 5, 31), -1)
 
 app.layout = html.Div(
     children=[
@@ -55,47 +45,29 @@ app.layout = html.Div(
             },
             style={
                 "width": "100%",
-                "height": "48vh",
+                "height": "45vh",
             },
             id="fig_live"
         ),
         dcc.Slider(
-            0, len(dates), 1, value=0,
-            marks={i: j for i, j in enumerate(dates)},
+            0, 2, 1,
             vertical=False, id="date_slicer",
         ),
-        html.Div([
-            # html.Div([
-            #     dcc.Slider(
-            #         0, len(dates), 1, value=0,
-            #         marks={i: j for i, j in enumerate(dates)},
-            #         vertical=True, id="date_slicer",
-            #         verticalHeight=500,
-            #     ),
-            # ], style={
-            #     "display": "flex",
-            #     "float": "left",
-            #     "width": "25%",
-            #     "height": "100%",
-            #     # "border": "1rem",
-            # }),
-                dcc.Graph(
-                    figure={
-                        'data': [],
-                        'layout': {
-                            'xaxis': {},
-                            'yaxis': {'title': 'Watt'},
-                            'hovermode': 'x unified',
-                        }
-                    },
-                    id="fig_aggregate",
-                    style={"width": "100%", "height": "100%"},
-                ),
-            # ], style={"display": "flex", "float": "right", "width": "75%"}),
-        ], style={
-            "width": "100%",
-            "height": "48vh",
-        }),
+        dcc.Graph(
+            figure={
+                'data': [],
+                'layout': {
+                    'xaxis': {},
+                    'yaxis': {'title': 'Watt', 'range': [-11000, 11000]},
+                    'hovermode': 'x unified',
+                }
+            },
+            id="fig_aggregate",
+            style={
+                "width": "100%",
+                "height": "45vh",
+            },
+        ),
     ]
 )
 
@@ -106,13 +78,32 @@ def transpose(rows, i):
 
 @dash.callback(
     Output("fig_aggregate", "figure"),
-    Input("dummy", "children"),
+    Output("date_slicer", "value"),
+    Output("date_slicer", "min"),
+    Output("date_slicer", "max"),
+    Output("date_slicer", "marks"),
+    Input("date_slicer", "value"),
 )
-def load_graph(dummy):
-    data = execute("select * from aggregated where time is not null", fetch="fetchall")
-    (min_date,), = execute("select min(time) from aggregated", fetch="fetchall")
+def initial_load(date_ord):
+    if not date_ord:
+        date_ord = datetime.date.today().toordinal()
+    slicer_min = date_ord - 15
+    slicer_max = date_ord + 15
+    slicer_marks = {
+        i: f"{datetime.date.fromordinal(i):%d.%m.%Y}"
+        for i in range(slicer_min, slicer_max + 1)
+    }
+    data = execute("""
+        select * from aggregated
+        where time >= ? and time < ?
+        order by time
+    """, fetch="fetchall", parameters=[
+        datetime.date.fromordinal(date_ord),
+        datetime.date.fromordinal(date_ord + 1),
+    ])
     fig = dash.Patch()
     names = {1: "PV", 4: "Akku", 7: "Grid", 10: "Load"}
+    X = transpose(data, 0)
     def gettraces(i, color):
         return [
             {
@@ -144,15 +135,19 @@ def load_graph(dummy):
                 "showlegend": False,
             },
         ]
-    X = transpose(data, 0)
-    fig['data'].extend([
+    fig['data'] = ([
         *gettraces(1, "00ff00"),
         *gettraces(4, "00ffff"),
         *gettraces(7, "ff0000"),
         *gettraces(10, "000000"),
     ])
-    print("game")
-    return fig
+    return (
+        fig,
+        date_ord,
+        slicer_min,
+        slicer_max,
+        slicer_marks,
+    )
 
 
 @dash.callback(
@@ -165,10 +160,11 @@ def load_graph(dummy):
 )
 def update_graph(interval, _, max_time):
     new_data = execute("""
-        SELECT
+        select
             time, pv, akku, grid, load
-        FROM new
+        from new
         where time > ?
+        order by time
     """, parameters=[max_time], fetch="fetchall")
     if not new_data:
         raise dash.exceptions.PreventUpdate
@@ -185,7 +181,7 @@ def update_graph(interval, _, max_time):
 
 # Run the app
 if __name__ == '__main__':
-    app.run_server(
-        debug=True,
+    app.run(
+        debug=False,
         host='0.0.0.0',
     )

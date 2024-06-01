@@ -4,7 +4,7 @@ from db import execute
 
 execute("""
 create table if not exists aggregated (
-    time timestamp,
+    time timestamptz,
     pv_min double,
     pv_max double,
     pv_avg double,
@@ -25,7 +25,7 @@ create index if not exists idx_time_agg on aggregated(time);
 
 execute("""
 create table if not exists new (
-    time timestamp,
+    time timestamptz,
     pv double,
     akku double,
     grid double,

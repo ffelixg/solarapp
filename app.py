@@ -41,7 +41,9 @@ app.layout = html.Div(
                     ],
                     'layout': {
                         'xaxis': {'range': [0, 5]},
-                        'yaxis': {'title': 'Watt'},
+                        'yaxis': {'title': '', 'side': 'right'},
+                        'margin': {'b': 40, 'l': 0, 'r': 40, 't': 0},
+                        'showlegend': False,
                         'hovermode': 'x unified',
                     }
                 },
@@ -58,8 +60,8 @@ app.layout = html.Div(
                         f"{name}: 69W",
                         style={
                             "background-color": f"#{color}44",
-                            "padding": "1rem",
-                            "margin": "1rem",
+                            "padding": "10%",
+                            "margin": "auto",
                             "border-radius": "1rem",
                         },
                         id=name,
@@ -83,14 +85,16 @@ app.layout = html.Div(
                 0, 2, 1,
                 vertical=False, id="date_slicer",
             ),
-            style={"margin": "0rem 4rem 1em 4rem"},
+            style={"margin": "0rem 4rem 1em 0rem"},
         ),
         dcc.Graph(
             figure={
                 'data': [],
                 'layout': {
                     'xaxis': {'range': [0, 1]},
-                    'yaxis': {'title': 'Watt', 'range': [-11000, 11000]},
+                    'yaxis': {'title': '', 'range': [-11000, 11000], 'side': 'right'},
+                    'margin': {'b': 40, 'l': 0, 'r': 40, 't': 0},
+                    'showlegend': False,
                     'hovermode': 'x unified',
                 }
             },
@@ -116,7 +120,7 @@ def transpose(rows, i):
     Output("date_slicer", "marks"),
     Input("date_slicer", "value"),
 )
-def initial_load(date_ord):
+def update_aggregate(date_ord):
     today_ord = datetime.datetime.now(pytz.timezone("Europe/Berlin")).date().toordinal()
     if not date_ord:
         date_ord = today_ord
@@ -134,7 +138,12 @@ def initial_load(date_ord):
         for i in range(slicer_min, slicer_max + 1)
     }
     data = execute("""
-        select aggregated.* replace(time at time zone 'Europe/Berlin' as time)
+        select
+            time at time zone 'Europe/Berlin',
+            round(pv_min)::int, round(pv_max)::int, round(pv_avg)::int,
+            round(akku_min)::int, round(akku_max)::int, round(akku_avg)::int,
+            round(grid_min)::int, round(grid_max)::int, round(grid_avg)::int,
+            round(load_min)::int, round(load_max)::int, round(load_avg)::int,
         from aggregated
         join (
             select dt as start, dt + interval '1 day' as end
@@ -168,15 +177,15 @@ def initial_load(date_ord):
                 "fillcolor": f"#{color}44",
                 "mode": 'lines',
                 'line': {'color': '#000000', 'width': 0},
-                "hovertext": [f"{names[i]} {row[i]:.2f} | {row[i+2]:.2f} | {row[i+1]:.2f}" for row in data],
-                "hoverinfo": "text",
-                "name": names[i],
+                "hoverinfo": "none",
             }, {
                 'x': X, 'y': transpose(data, i+2),
                 "type": 'scatter',
                 "mode": 'lines',
                 'line': {'color': f'#{color}ff', 'width': 3},
-                "hoverinfo": "none",
+                "hovertext": [f"{names[i]} {row[i]} < {row[i+2]} < {row[i+1]}" for row in data],
+                "hoverinfo": "x+text",
+                "name": names[i],
                 "showlegend": False,
             },
         ]
@@ -203,11 +212,12 @@ def initial_load(date_ord):
     Input("dummy", "children"),
     State("max_time", "data"),
 )
-def update_graph(interval, _, max_time):
+def update_ticker(interval, _, max_time):
     print(max_time)
     new_data = execute("""
         select
-            time at time zone 'Europe/Berlin', pv, akku, grid, load
+            time at time zone 'Europe/Berlin',
+            round(pv)::int, round(akku)::int, round(grid)::int, round(load)::int,
         from new
         where time > cast(? as TIMESTAMP) at time zone 'Europe/Berlin'
         order by time

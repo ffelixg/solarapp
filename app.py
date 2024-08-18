@@ -17,6 +17,9 @@ names_colors = (
     ("Haus", "000000"),
 )
 
+yaxis_range = [-11000, 11000]
+yaxis2_range = [-1.1, 1.1]
+
 app.layout = html.Div(
     children=[
         html.Div(style={"hidden": "true"}, id="dummy"),
@@ -92,8 +95,9 @@ app.layout = html.Div(
                 'data': [],
                 'layout': {
                     'xaxis': {'range': [0, 1]},
-                    'yaxis': {'title': '', 'range': [-11000, 11000], 'side': 'right'},
-                    'margin': {'b': 40, 'l': 0, 'r': 40, 't': 0},
+                    'yaxis': {'title': '', 'side': 'right', 'range': yaxis_range},
+                    'yaxis2': {'title': '', 'side': 'left', 'range': yaxis2_range, 'tickformat': ',.0%', 'overlaying': 'y'},
+                    'margin': {'b': 40, 'l': 40, 'r': 40, 't': 5},
                     'showlegend': False,
                     'hovermode': 'x unified',
                 }
@@ -144,6 +148,7 @@ def update_aggregate(date_ord):
             round(akku_min)::int, round(akku_max)::int, round(akku_avg)::int,
             round(grid_min)::int, round(grid_max)::int, round(grid_avg)::int,
             round(load_min)::int, round(load_max)::int, round(load_avg)::int,
+            battery_pct,
         from aggregated
         join (
             select dt as start, dt + interval '1 day' as end
@@ -155,6 +160,8 @@ def update_aggregate(date_ord):
 
     fig = dash.Patch()
     fig["layout"]["xaxis"]["range"] = [date, date + datetime.timedelta(days=1)]
+    fig["layout"]["yaxis"]["range"] = yaxis_range
+    fig["layout"]["yaxis2"]["range"] = yaxis2_range
 
     names = {k: name for k, (name, _) in zip([1, 4, 7, 10], names_colors)}
     X = transpose(data, 0)
@@ -189,12 +196,22 @@ def update_aggregate(date_ord):
                 "showlegend": False,
             },
         ]
-    fig['data'] = ([
+    fig['data'] = [
+        {
+            'x': X, 'y': transpose(data, 13),
+            "type": 'scatter',
+            "mode": 'lines',
+            'line': {'color': '#cc33ccff', 'width': 2},
+            "hoverinfo": "name+x+y",
+            "name": "Ladung",
+            "showlegend": True,
+            "yaxis": "y2",
+        },
         *gettraces(1, "00ff00"),
         *gettraces(4, "00ffff"),
         *gettraces(7, "ff0000"),
         *gettraces(10, "000000"),
-    ])
+    ]
     return (
         fig,
         date_ord,
@@ -237,7 +254,7 @@ def update_ticker(interval, _, max_time):
     return (
         fig, max_time_new,
         *[
-            f"{name}: {int(val)}W"
+            f"{name}: {int(val)}W" if val is not None else "-"
             for (name, _), val in zip(names_colors, new_data[-1][1:])
         ]
     )

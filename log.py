@@ -19,6 +19,7 @@ create table if not exists aggregated (
     load_avg double,
     total double,
     cnt integer,
+    battery_pct double,
 );
 create index if not exists idx_time_agg on aggregated(time);
 """)
@@ -31,6 +32,7 @@ create table if not exists new (
     grid double,
     load double,
     total double,
+    battery_pct double,
 );
 create index if not exists idx_time_new on new(time);
 """)
@@ -54,6 +56,7 @@ def dump():
             avg(load),
             avg(total),
             count(*),
+            avg(battery_pct),
         from (
             select * from new
             where datediff('second', time, (select max(time) from new)) <= 60
@@ -74,17 +77,17 @@ try:
                 """)
 
             data_req = requests.get("http://192.168.188.37/solar_api/v1/GetPowerFlowRealtimeData.fcgi", timeout=120).json()
-            execute("insert into new values (strptime(?, '%Y-%m-%dT%H:%M:%S%z'), ?, ?, ?, ?, ?)", (
+            execute("insert into new values (strptime(?, '%Y-%m-%dT%H:%M:%S%z'), ?, ?, ?, ?, ?, ?)", (
                 data_req["Head"]["Timestamp"],
                 data_req["Body"]["Data"]["Site"]["P_PV"],
                 data_req["Body"]["Data"]["Site"]["P_Akku"],
                 data_req["Body"]["Data"]["Site"]["P_Grid"],
                 data_req["Body"]["Data"]["Site"]["P_Load"],
                 data_req["Body"]["Data"]["Site"]["E_Total"],
+                data_req["Body"]["Data"]["Inverters"]["1"].get("SOC", 0) / 100,
             ))
 
             print("logged", time())
-            # sleep((-time()) % 0.5) # max 2 requests per second
             sleep(1)
 
         except Exception as e:

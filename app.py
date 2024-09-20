@@ -148,12 +148,17 @@ def update_aggregate(date_ord):
             round(akku_min)::int, round(akku_max)::int, round(akku_avg)::int,
             round(grid_min)::int, round(grid_max)::int, round(grid_avg)::int,
             round(load_min)::int, round(load_max)::int, round(load_avg)::int,
-            battery_pct,
-        from aggregated
-        join (
+            battery_pct, (total - total_offset) / total_scale, (total - total_offset)/1000,
+        from (
             select dt as start, dt + interval '1 day' as end
             from (select ? at time zone 'Europe/Berlin' as dt)_
-        ) as filter
+        ) as filter,
+        lateral (
+            select min(total), max(total) - min(total)
+            from aggregated
+            where filter.start <= time and time < filter.end
+        ) totalminmax(total_offset, total_scale)
+        join aggregated
         on filter.start <= time and time < filter.end
         order by time
     """, fetch="fetchall", parameters=[date])
@@ -204,6 +209,16 @@ def update_aggregate(date_ord):
             'line': {'color': '#cc33ccff', 'width': 2},
             "hoverinfo": "name+x+y",
             "name": "Ladung",
+            "showlegend": True,
+            "yaxis": "y2",
+        },
+        {
+            'x': X, 'y': transpose(data, 14),
+            "type": 'scatter',
+            "mode": 'lines',
+            'line': {'color': '#00ff0088', 'width': 2},
+            "hovertext": [f"Gesamt {row[15]:.3f} kWh ({row[14]*100:.0f}%)" for row in data],
+            "hoverinfo": "text",
             "showlegend": True,
             "yaxis": "y2",
         },

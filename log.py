@@ -1,6 +1,7 @@
 import requests
 from time import sleep, time
 from db import execute
+import traceback
 
 execute("""
 create table if not exists aggregated (
@@ -87,11 +88,10 @@ try:
                 data_req["Body"]["Data"]["Inverters"]["1"].get("SOC", 0) / 100,
             ))
 
-            print("logged", time())
             sleep(1)
 
         except Exception as e:
-            print(e)
+            print(traceback.format_exc(), flush=True)
 
 finally:
     dump()
